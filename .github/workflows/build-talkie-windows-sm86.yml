@@ -27,27 +27,39 @@ jobs:
         with:
           arch: x64
 
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          choco install ninja -y
+
       - name: Verify tools
         shell: pwsh
         run: |
           cmake --version
+          ninja --version
           nvcc --version
           where.exe cl
           where.exe nvcc
-          where.exe cmake
+          where.exe ninja
           echo "CUDA_PATH=$env:CUDA_PATH"
 
       - name: Configure CMake
         shell: pwsh
+        env:
+          CC: cl
+          CXX: cl
         run: |
           cmake -S . -B build `
-            -G "Visual Studio 17 2022" `
-            -A x64 `
+            -G "Ninja" `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_CUDA_COMPILER="$env:CUDA_PATH\bin\nvcc.exe" `
             -DGGML_CUDA=ON `
             -DCMAKE_CUDA_ARCHITECTURES=86 `
             -DGGML_NATIVE=OFF `
             -DLLAMA_BUILD_SERVER=ON `
-            -DLLAMA_CURL=OFF
+            -DLLAMA_CURL=OFF `
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build llama-server
         shell: pwsh
