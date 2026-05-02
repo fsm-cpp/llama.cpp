@@ -1,0 +1,104 @@
+name: Build Talkie Windows CUDA sm86
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-cuda-sm86:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout talkie branch
+        uses: actions/checkout@v4
+        with:
+          repository: thomasgauthier/llama.cpp
+          ref: talkie-1930
+          submodules: recursive
+
+      - name: Show environment
+        shell: pwsh
+        run: |
+          cmake --version
+          git rev-parse --short HEAD
+          git branch --show-current
+
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          choco install ninja -y
+
+      - name: Setup CUDA 12.4
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev"]'
+
+      - name: Verify CUDA
+        shell: pwsh
+        run: |
+          nvcc --version
+          echo "CUDA_PATH=$env:CUDA_PATH"
+          where.exe nvcc
+          where.exe cmake
+          where.exe ninja
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -G "Ninja Multi-Config" `
+            -DGGML_CUDA=ON `
+            -DCMAKE_CUDA_ARCHITECTURES=86 `
+            -DLLAMA_BUILD_SERVER=ON `
+            -DLLAMA_CURL=OFF `
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build llama-server
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target llama-server -j 4
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+
+          Get-ChildItem -Path build -Recurse -Filter "llama-server.exe" | Select-Object -First 1 | ForEach-Object {
+            Copy-Item $_.FullName artifact\llama-server.exe
+          }
+
+          Get-ChildItem -Path build -Recurse -Filter "ggml*.dll" | ForEach-Object {
+            Copy-Item $_.FullName artifact\
+          }
+
+          Get-ChildItem -Path build -Recurse -Filter "llama*.dll" | ForEach-Object {
+            Copy-Item $_.FullName artifact\
+          }
+
+          Get-ChildItem -Path build -Recurse -Filter "*.dll" | ForEach-Object {
+            if ($_.Name -match "ggml|llama") {
+              Copy-Item $_.FullName artifact\ -Force
+            }
+          }
+
+          if ($env:CUDA_PATH) {
+            Copy-Item "$env:CUDA_PATH\bin\cudart64_12.dll" artifact\ -ErrorAction SilentlyContinue
+            Copy-Item "$env:CUDA_PATH\bin\cublas64_12.dll" artifact\ -ErrorAction SilentlyContinue
+            Copy-Item "$env:CUDA_PATH\bin\cublasLt64_12.dll" artifact\ -ErrorAction SilentlyContinue
+          }
+
+          Copy-Item LICENSE artifact\LICENSE.txt -ErrorAction SilentlyContinue
+
+          Get-ChildItem artifact
+
+      - name: Zip artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifact\* -DestinationPath talkie-llama-server-win-cuda-sm86.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: talkie-llama-server-win-cuda-sm86
+          path: talkie-llama-server-win-cuda-sm86.zip
