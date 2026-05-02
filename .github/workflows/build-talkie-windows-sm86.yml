@@ -15,18 +15,6 @@ jobs:
           ref: talkie-1930
           submodules: recursive
 
-      - name: Show environment
-        shell: pwsh
-        run: |
-          cmake --version
-          git rev-parse --short HEAD
-          git branch --show-current
-
-      - name: Install Ninja
-        shell: pwsh
-        run: |
-          choco install ninja -y
-
       - name: Setup CUDA 12.4
         uses: Jimver/cuda-toolkit@v0.2.24
         with:
@@ -34,25 +22,32 @@ jobs:
           method: 'network'
           sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev"]'
 
-      - name: Verify CUDA
+      - name: Setup MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify tools
         shell: pwsh
         run: |
+          cmake --version
           nvcc --version
-          echo "CUDA_PATH=$env:CUDA_PATH"
+          where.exe cl
           where.exe nvcc
           where.exe cmake
-          where.exe ninja
+          echo "CUDA_PATH=$env:CUDA_PATH"
 
       - name: Configure CMake
         shell: pwsh
         run: |
           cmake -S . -B build `
-            -G "Ninja Multi-Config" `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
             -DGGML_CUDA=ON `
             -DCMAKE_CUDA_ARCHITECTURES=86 `
+            -DGGML_NATIVE=OFF `
             -DLLAMA_BUILD_SERVER=ON `
-            -DLLAMA_CURL=OFF `
-            -DCMAKE_BUILD_TYPE=Release
+            -DLLAMA_CURL=OFF
 
       - name: Build llama-server
         shell: pwsh
@@ -64,28 +59,25 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
 
-          Get-ChildItem -Path build -Recurse -Filter "llama-server.exe" | Select-Object -First 1 | ForEach-Object {
-            Copy-Item $_.FullName artifact\llama-server.exe
+          $server = Get-ChildItem -Path build -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+          if (-not $server) {
+            Write-Error "llama-server.exe not found"
+            exit 1
           }
 
-          Get-ChildItem -Path build -Recurse -Filter "ggml*.dll" | ForEach-Object {
-            Copy-Item $_.FullName artifact\
-          }
-
-          Get-ChildItem -Path build -Recurse -Filter "llama*.dll" | ForEach-Object {
-            Copy-Item $_.FullName artifact\
-          }
+          Copy-Item $server.FullName artifact\llama-server.exe -Force
 
           Get-ChildItem -Path build -Recurse -Filter "*.dll" | ForEach-Object {
-            if ($_.Name -match "ggml|llama") {
-              Copy-Item $_.FullName artifact\ -Force
-            }
+            Copy-Item $_.FullName artifact\ -Force
           }
 
           if ($env:CUDA_PATH) {
             Copy-Item "$env:CUDA_PATH\bin\cudart64_12.dll" artifact\ -ErrorAction SilentlyContinue
             Copy-Item "$env:CUDA_PATH\bin\cublas64_12.dll" artifact\ -ErrorAction SilentlyContinue
             Copy-Item "$env:CUDA_PATH\bin\cublasLt64_12.dll" artifact\ -ErrorAction SilentlyContinue
+            Copy-Item "$env:CUDA_PATH\bin\nvrtc64_120_0.dll" artifact\ -ErrorAction SilentlyContinue
+            Copy-Item "$env:CUDA_PATH\bin\nvrtc-builtins64_120.dll" artifact\ -ErrorAction SilentlyContinue
+            Copy-Item "$env:CUDA_PATH\bin\nvJitLink_120_0.dll" artifact\ -ErrorAction SilentlyContinue
           }
 
           Copy-Item LICENSE artifact\LICENSE.txt -ErrorAction SilentlyContinue
